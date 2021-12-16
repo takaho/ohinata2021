@@ -377,8 +377,10 @@ def display_cluster_map(arguments=None):
     ]
 
     coord = pd.read_csv(fn_input, sep='\t', index_col=0)
+    cluster2color = None
 
     if args.color is not None:
+        cluster2color = {}
         with open(args.color) as fi:
             for line in fi:
                 items = line.strip().split('\t')
