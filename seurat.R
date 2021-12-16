@@ -1,3 +1,4 @@
+# Analyzing R script running Seurat used in the paper by Ohinata et al. (2021)
 # Rscript seurat.R [cellranger matrix directory] [output directory]
 # Parameters and procedure cellranger outputs
 # Output files named as seurat.* will be used using 10xhart.py
@@ -6,7 +7,7 @@ library(dplyr)
 library(Seurat)
 library(reticulate)
 
-srcdir<-"."
+srcdir<-"outs/filtered_feature_bc_matrix/"
 outdir<-"seurat_out"
 args<-commandArgs(trailingOnly=TRUE)
 
@@ -40,7 +41,7 @@ print("READ DATA")
 sc.data <- Read10X(data.dir = srcdir) 
 
 # set barcode names
-colnames(sc.data) <- paste0(colnames(sc.data), 1:ncol(sc.data)) 
+# colnames(sc.data) <- paste0(colnames(sc.data), 1:ncol(sc.data)) 
 
 # Initialize the Seurat object with the raw (non-normalized data).
 sc <- CreateSeuratObject(counts = sc.data, project=outdir, min.cells = 5, min.features = 200)

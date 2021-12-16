@@ -1,3 +1,12 @@
+"""
+Visualization script used in Ohinata et al. 2021.
+To detect clusters of dead cells or those of multiplet cells, 
+'count' command was applied and read count distribution was estimated.
+Contaminated feeder cells weere removed by gene expression specific to 
+them such as Ctcf using 'marker' command.
+THe command 'cluster' displays colored clusters in 2d plot.
+"""
+
 import os, sys, re
 import pandas as pd
 import numpy as np
@@ -11,60 +20,6 @@ import scipy.sparse
 import pickle
 import gzip
 from cellrangerwrapper import *
-
-"""
-Show markers
-python  ../../../ohinata/python/10xchart.py marker -i charts/${s}/umap.tsv -o charts/${s}/ -e ${s}/seurat.normalized.tsv --verbose -c ${s}/seurat.clusters.tsv -g SPN CD24 CD3D PTPRC CD53 GZMA GZMB FOXP3 CTLA4 SELL
-
-
-Make chart using defined clusters and colors
-python  ../../../ohinata/python/10xchart.py cluster --color stats/DK20104_01/cluster_color.tsv -i charts/DK20104_01/umap.tsv -o charts/DK20104_01/ -e DK20104_01/seurat.normalized.tsv --verbose -c DK20104_01/seurat.clusters.tsv 
-"""
-
-# def save_contour(data, **kwargs):
-#     import scipy.signal
-#     import matplotlib.pyplot as plt
-#     import matplotlib.backends.backend_pdf
-#     import numba
-
-#     @numba.njit('void(i8[:], i8, i8[:])')
-#     def count_dots(valrange, steps, out):
-#         xmin = valrange[0]
-#         xmax = valrange[1]
-#         ymin = valrange[2]
-#         ymax = valrange[3]
-#         nrows = out.shape[0]
-#         ncols = out.shape[1]
-#         out[:,:] = 0
-#         for i in range(out.size):
-#             row = int(np.floor((out[i,0] - ymin) * steps / (ymax - ymin)))
-#             col = int(np.floor((out[i,1] - xmin) * steps / (xmax - xmin)))
-#             if 0 <= row < nrows and 0 <= col < ncols:
-#                 out[row,col] += 1
-
-#     filename = kwargs.get('filename', 'contour.pdf')
-#     xmin=kwargs.get('xmin')
-#     xmax=kwargs.get('xmax')
-#     ymin=kwargs.get('ymin')
-#     ymax=kwargs.get('ymax')
-#     step = kawrgs.get('steps', 20)
-#     smoothing = kwargs.get('smoothing', 11)
-#     verbose = kwargs.get('verbose', default=False, dtype=np.bool)
-#     x = np.linspace(xmin, xmax, int((xmax - xmin) / step))
-#     y = np.linspace(ymin, ymax, int((ymax - ymin) / step))
-#     X, Y = np.meshgrid(x, y)
-#     Z = np.zeros(X.shape)
-#     count_dots([xmin,xmax,ymin,ymax], steps, Z)
-#     if smoothing >= 3:
-#         Z = scipy.signal.savgol_filter(Z, window_length=(smoothing, smoothing), polyorder=3)
-
-#     doc = matplotlib.backends.backend_pdf.PdfPages(filename)
-
-#     plt.contourf(X, Y, Z, 2, cmap='Reds')
-#     plt.colorbar()
-#     doc.savefig()
-#     doc.close()
-
 
 def calculate_coordinate_color(pos, cmin, cmax, random_factor=0.4, colormode=0):
     deg = [(pos[i] - cmin[i])/(cmax[i] - cmin[i]) for i in range(len(pos))]
@@ -98,10 +53,6 @@ def calculate_coordinate_color(pos, cmin, cmax, random_factor=0.4, colormode=0):
             green = deg[0] + (deg[1] - .6) * 2.5
             red = deg[0] * (1-deg[1])
             blue = (1-deg[0]) ** 2 - deg[1] * .1
-        # else:
-        #     red = deg[0] 
-        #     green = deg[1] * (1-deg[0])
-        #     blue = (1-deg[1]) ** 2 * np.sqrt(1-deg[0])
         else:
             return None        
     else:
@@ -110,13 +61,10 @@ def calculate_coordinate_color(pos, cmin, cmax, random_factor=0.4, colormode=0):
         green = deg[2]
     values = np.array((red, green, blue))
     if random_factor > 0:
-        # print(values)
         values += (np.random.rand(3) - 0.5) * random_factor 
-        # print(values)
     rgb = np.array(values * 256, dtype=np.int32)
     rgb[rgb<0] = 0
     rgb[rgb>255] = 255
-    # print(deg, rgb)
     return 'rgb({},{},{})'.format(rgb[0], rgb[1], rgb[2])
 
 def load_reads_from_sparse_matrix(srcdir:str, **kwargs)->pd.DataFrame:
@@ -176,8 +124,6 @@ def show_marker(arguments=None):
     parser.add_argument('--threshold', default=1, type=float, help='expression threshold, 0.9 as 90% in percentile mode')
     parser.add_argument('--percentile', action='store_true')
     parser.add_argument('--output-all', action='store_true')
-    # parser.add_argument('--contour', action='store_true')
-    # args = parser.parse_args(arguments)
     args = parser.parse_known_args(arguments)[0]
 
     verbose = args.verbose
@@ -243,7 +189,6 @@ def show_marker(arguments=None):
         for gene in sorted(markers):
             if gene not in expr.index: continue
             values = expr.loc[gene].values
-            # print(values.__class__, values.shape)
             pt = np.percentile(values, [0, 50, 90, 95, 99, 99.9, 100])
             sys.stderr.write('{}\t{:.3f}\t{:.3f}\t{:.3f}\n'.format(gene, pt[0], pt[1], pt[2]))
 
@@ -251,13 +196,11 @@ def show_marker(arguments=None):
     with open(fn_info, 'w') as fo:
         fo.write('input:{}\n'.format(fn_expression))
         fo.write('n_cells:{}\n'.format(coord.shape[0]))
-        # fo.write('n_features:{}\n'.format(coord.shape[0]))
         if clusters is not None:
             fo.write('clusers:{}\n'.format(n_clusters))
             for cn in set(clusters):
-            # for i in range(1, n_clusters+1):
                 index = [j for j in range(len(clusters)) if clusters[j] == cn]
-                n_cells_cluster = len(index)#np.count_nonzero(clusters[clusters==i])
+                n_cells_cluster = len(index)
                 if n_cells_cluster > 0:
                     cluster2index[cn] = index
                     fo.write('cluster_C{}={} cells\n'.format(cn, n_cells_cluster))
@@ -267,7 +210,6 @@ def show_marker(arguments=None):
 
     n_cols = (expr.shape[0] + 7) // 8
     n_rows = min(8, expr.shape[0])# // 8
-    # print('{} x {}'.format(n_rows, n_cols))
     symbols = ['circle', 'diamond', 'square', 'triangle-up', 'circle-open-dot', 
     'diamond-open-dot', 'square-open-dot', 'cross', 'triangle-left', 'triangle-left-open']
     symbols = ['circle', ]
@@ -282,8 +224,6 @@ def show_marker(arguments=None):
             values = expr.loc[g].values
             row = (i % n_rows) + 1
             col = (i // n_rows) + 1
-            # print('{} : {} / {} x {} / {}'.format(i, row, n_rows, col, n_cols))
-            # df = pd.DataFrame([clusters, values], index=['Cluster', 'Expression']).T
             fig.add_trace(go.Violin(x=clusters, y=values, name=g, meanline_visible=True, opacity=0.6, box_visible=False), 
             row=row, col=col)
 
@@ -412,19 +352,15 @@ def display_cluster_map(arguments=None):
     parser.add_argument('--colormode', type=int, default=-1, help='color mode')
     parser.add_argument('--preset-color', action='store_true')
     parser.add_argument('--min-cluster-size', default=10, type=int)
-    # parser.add_argument('--contour', action='store_true')
-    # parser.add_argument('--output-all', action='store_true')
     args = parser.parse_known_args(arguments)[0]
-    # display_contour = args.contour
 
     verbose = args.verbose
     chart_type = args.d
-    fn_input = list(sorted(args.u))[0]#, key=lambda f:os.))[0]
+    fn_input = list(sorted(args.u))[0]
     outdir = args.o
     mode2d = (args.d == 2)
     percentile_mode = args.percentile
     fn_expression = args.e
-    # output_all = args.output_all
 
     os.makedirs(outdir, exist_ok=True)
     lower_limit = args.min_cluster_size
@@ -582,7 +518,6 @@ def display_cluster_map(arguments=None):
     for cn, index in cluster2index.items():
         if cn < 0: continue
         if lower_limit > 0 and len(index) < lower_limit: continue
-        # print(cn, index)
         if mode2d:
             xyz = coord.values[index,0:2]
         else:
@@ -590,7 +525,6 @@ def display_cluster_map(arguments=None):
         name = 'C{} ({})'.format(cn + 1, len(index))
         if alt_labels is not None:
             name = alt_labels[cn]
-        # print(name)
         texts = coord.index[index]
         marker = dict(size=2, symbol=symbols[i_ % len(symbols)])
         if cn in cluster2color:
@@ -604,19 +538,6 @@ def display_cluster_map(arguments=None):
         if mode2d:
             trace = go.Scattergl(x=xyz[:,0], y=xyz[:,1], name=name, text=texts,
             mode='markers', marker=marker)
-
-        # if display_contour:            
-        #     cntdir = os.path.join(outdir, 'contour')
-        #     os.makedirs(cntdir, exist_ok=True)
-        #     filename_contour = os.path.join(cntdir, 'C{}.pdf'.format(cn + 1))
-        #     if verbose:
-        #         sys.stderr.write('Contour {} to {}\n'.format(cn, filename_contour))
-        #     comax = np.array(np.max(xyz, axis=0)).reshape(-1)
-        #     save_contour(xyz, xmin=0, xmax=comax[0], ymin=comax[1], ymax=ymax,
-        #         steps=20,
-        #         smoothing = 11, 
-        #         filename=filename_contour)
-            # filename_tmp = os.path.join()
         else:
             trace = go.Scatter3d(x=xyz[:,0], y=xyz[:,1], z=xyz[:,2], name=name,
                 text=texts, mode='markers', marker=marker)
@@ -657,13 +578,12 @@ def count_tags_by_cluster(arguments=None):
     parser.add_argument('-o', default='stat')
     parser.add_argument('-e', default=None)
     parser.add_argument('--bin', type=int, default=50)
-    # args = parser.parse_args(arguments)
     args = parser.parse_known_args(arguments)[0]
 
     verbose = args.verbose
     srcdir = args.i
 
-    # fn_cluster = args.o
+    # set filenames of output
     outdir = args.o
     os.makedirs(outdir, exist_ok=True)
     fn_count = os.path.join(outdir, 'count_by_cluster.tsv')
@@ -674,8 +594,6 @@ def count_tags_by_cluster(arguments=None):
     fn_expr = args.e
     fn_cluster = args.c
     forced = args.forced
-
-        
 
     if os.path.exists(fn_stat) is False or forced:
         if verbose: sys.stderr.write('\033[Kloading clusters\r')
@@ -706,28 +624,22 @@ def count_tags_by_cluster(arguments=None):
 
         if verbose:
             sys.stderr.write('\033[Kloading matrix\r')
-        # features = load_features(srcdir)
         cdf = load_reads_from_sparse_matrix(srcdir)
         counts_per_cell = cdf['n_Reads'].values.reshape(-1)
         features_per_cell = cdf['n_Features'].values.reshape(-1)
-        # matrix = load_sparse_matrix(srcdir)
         if verbose:
             sys.stderr.write('\033[K{} x {} matrix loaded\n'.format(cdf.shape[0], cdf.shape[1]))
-        # count_per_cell = np.array(np.sum(matrix, axis=0)).reshape(-1)
 
         n_cells = len(barcodes)
         reads_and_genes = np.zeros((n_cells, 3), dtype=np.float32)
-        # csc = matrix.tocsc()
         for i, barcode in enumerate(barcodes):
             col = barcode2column[barcode]
             if barcode in clusterdf.index:
                 clus = clusterdf.loc[barcode].values[0]
             else:
                 clus = -1
-            # obs = csc[:,col]
-            # n_reads = obs.sum()
             n_reads = counts_per_cell[i]
-            n_features = features_per_cell[i]#obs.sign().sum()
+            n_features = features_per_cell[i]
             reads_and_genes[i] = (clus, n_reads, n_features)
         stat = pd.DataFrame(reads_and_genes, columns=['Cluster', 'n_reads', 'n_features'], index=barcodes, dtype=np.int32)
         stat.to_csv(fn_stat, sep='\t')
@@ -740,7 +652,6 @@ def count_tags_by_cluster(arguments=None):
     cluster_to_data = collections.OrderedDict()
 
     fn_scatter = os.path.join(outdir, 'coloredclusters.html')
-    # print(clusters)
     traces = []
     cluster_title = []
 
@@ -750,7 +661,6 @@ def count_tags_by_cluster(arguments=None):
     total_sd = np.std(total)
     total_med = np.median(total)
     cluster_color = {}
-    # print(total_mean, total_sd, total_med)
 
     for cn in sorted(clusters):
         submat = stat[stat['Cluster']==cn]
@@ -766,7 +676,6 @@ def count_tags_by_cluster(arguments=None):
         deg = z
         u = min(255, max(0, int((deg + 1) * 256)))
         d = min(255, max(0, int((1 - deg) * 256)))
-        # print(cn, submat_mean, z, deg, u, d, int(deg + 1), int(deg + 1) * 256)
         red = 255 if deg > 0 else u
         green = min(u, d)
         blue = 255 if deg < 0 else d
@@ -800,11 +709,10 @@ def count_tags_by_cluster(arguments=None):
         cols=n_chart_cols, 
         rows=n_chart_rows, 
         subplot_titles=cluster_title)
-    # print((n_clusters + n_chart_cols - 1)// n_chart_cols,n_clusters, n_chart_cols)
+
     xlimit = min(30000, maxcnt) #// binsize
     gsize = xlimit // binsize
     x = np.arange(0, maxcnt, binsize)
-    # x = np.array([(i * binsize) for i in range(maxcnt // binsize)])
     accum = np.zeros(x.shape[0], dtype=np.int32)
 
     index = 0
@@ -842,9 +750,10 @@ def count_tags_by_cluster(arguments=None):
 
     return outputs
 
-def main_chart():
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('cmd', choices=['marker', 'count', 'cluster', 'all'])
+    parser.add_argument('--seurat-dir', default=None, metavar='directory', help='output directory of seurat.R script')
     parser.add_argument('-e', help='expression tsv', default=None)
     parser.add_argument('-g', nargs='+', default=None, help='marker genes for marker command')
     parser.add_argument('-u', default=None, help='coordinates such as UMAP or tSNE')
@@ -865,14 +774,21 @@ def main_chart():
     parser.add_argument('-d', type=int, default=2, choices=[2, 3], help='2D or 3D chart')
     parser.add_argument('--verbose', action='store_true')
 
-
     args = parser.parse_known_args()[0]
-    # print(args)
     cargs = list(sys.argv[2:])
     cmd = args.cmd
+    if args.seurat_dir is not None:
+        basedir = args.seurat_dir
+        if args.e is None: 
+            cargs += ['-e', os.path.join(basedir, 'seurat.normalized.tsv')]
+        if args.u is None:
+            cargs += ['-u', os.path.join(basedir, 'seurat.umap.tsv')]
+        if args.c is None:
+            cargs += ['-c', os.path.join(basedir, 'seurat.clusters.tsv')]
 
     if cmd == 'all':
-        # determine count distribution
+        if args.g is not None:
+            show_marke(cargs)
         results = count_tags_by_cluster(cargs)
         if args.e is None:
             cargs += ['-e', results['count.tsv']]
@@ -884,7 +800,6 @@ def main_chart():
         show_marker(cargs)
     elif cmd == 'count':
         info = count_tags_by_cluster(cargs)
-
     # outputs = {
     #     'cluter.count.tsv':fn_count,
     #     'stats.tsv':fn_stat,
@@ -902,5 +817,4 @@ def main_chart():
         raise Exception('not implemented {}'.format(cmd))
 
 if __name__ == '__main__':
-    # main()
-    main_chart()
+    main()
