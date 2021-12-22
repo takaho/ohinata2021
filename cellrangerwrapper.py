@@ -5,43 +5,48 @@ import pandas as pd
 import numpy as np
 import scipy.io
 import os, sys, re
+import logging
+
+def _load_items(dirname, **kwargs):
+    name = kwargs.get('name')
+    column = kwargs.get('column', -1)
+    trim_suffix = kwargs.get('trim', False)
+    fbz = os.path.join(dirname, f'{name}.tsv.gz')
+    fb = os.path.join(dirname, f'{name}.tsv')
+    items = []
+    if os.path.exists(fbz):
+        with gzip.open(fbz) as fi:
+            for line in fi:
+                items.append(line.decode('utf-8').strip())
+    else:
+        with open(fb) as fi:
+            for line in fi:
+                items.append(line.strip())
+    if column >= 0:
+        data = []
+        for line in items:
+            data.append(line.split('\t')[column])
+        items = data
+    if trim_suffix:
+        data = []
+        for line in items:
+            data.append(re.split('\\W', line)[0])
+        items = data
+    return items
 
 def load_barcodes(dirname, **kwargs):
     """Load barcodes.tsv or barcodes.tsv.gz"""
-    import gzip
-    fbz = os.path.join(dirname, 'barcodes.tsv.gz')
-    fb = os.path.join(dirname, 'barcodes.tsv')
-    if os.path.exists(fbz):
-        barcodes = []
-        with gzip.open(fbz) as fi:
-            for line in fi:
-                barcodes.append(line.decode('utf-8').strip())
-    else:
-        with open(fb) as fi:
-            for line in fi:
-                barcodes.append(line.strip())
-    return barcodes
+    kwargs['name'] = 'barcodes'
+    return _load_items(dirname, **kwargs)
 
 def load_features(dirname, **kwargs):
-    import gzip
-    fbz = os.path.join(dirname, 'features.tsv.gz')
-    fb = os.path.join(dirname, 'features.tsv')
-    if os.path.exists(fbz):
-        barcodes = []
-        with gzip.open(fbz) as fi:
-            for line in fi:
-                barcodes.append(line.decode('utf-8').strip())
-    else:
-        with open(fb) as fi:
-            for line in fi:
-                barcodes.append(line.strip())
-    return barcodes
+    kwargs['name'] = 'features'
+    return _load_items(dirname, **kwargs)
 
 def load_sparse_matrix(dirname:str, **kwargs):
     """Load matrx.mtx
     """
     import gzip
-    # fgz = os.path.join(dirname, 'features.tsv.gz')
     fm = os.path.join(dirname, 'matrix.mtx')
     mtz = os.path.join(dirname, 'matrix.mtx.gz')
 
@@ -189,7 +194,7 @@ def _check_sparse_matrix(srcdir):
         flag = False
         for z in ('', '.gz'):
             fn = os.path.join(srcdir, f + z)
-            if os.path.exists(fn) and os.path.getsize(fn) > 1000:
+            if os.path.exists(fn) and os.path.getsize(fn) > 10:
                 flag = True
                 break
         if not flag:
@@ -203,42 +208,59 @@ def load_gene_expression(filename:str, genes:list, **kwargs)->pd.DataFrame:
     import hashlib, sqlite3, gzip, json
     verbose = kwargs.get('verbose', False)
     forced = kwargs.get('forced', False)
+    logger = kwargs.get('logger', None)
+    if logger is None:
+        logger = logging.getLogger(__name__)
+        if verbose:
+            logger.setLevel(logging.DEBUG)
+
     # print(filename)
     # print(filename, os.path.isdir(filename), _check_sparse_matrix(filename))
-    if os.path.isdir(filename) and _check_sparse_matrix(filename):
-        feature_field = kwargs.get('feature_field', 1)
-        filename = convert_sparse_matrix_to_count(filename, field=feature_field, verbose=verbose, forced=forced)
+    if os.path.isdir(filename):
+        logger.info('loading sparse matrix')
+        if _check_sparse_matrix(filename):
+            feature_field = kwargs.get('feature_field', 1)
+            filename = convert_sparse_matrix_to_count(filename, field=feature_field, verbose=verbose, forced=forced)
+        else:
+            raise Exception("invalid directory")
 
-    # filename_expression = os.path.join(srcdir, 'expr.tsv')
-    # filename_labels = os.path.join(srcdir, 'dbscan.tsv')
     srcdir = os.path.dirname(filename)
 
     genes = set(genes)
     if isinstance(genes, str):
         genes = [genes, ]
     filename_db = os.path.join(srcdir, '.' + os.path.basename(filename) + '.expr.db')
-    if verbose:
-        sys.stderr.write('expression database file is {}\n'.format(filename_db))
+    
+    logger.info('expression database file is {}'.format(filename_db))
     expression = {}
     with sqlite3.connect(filename_db) as cnx:
         cur = cnx.cursor()
         cur.execute('create table if not exists expression(gene not null primary key, data blob)')
         cached_genes = []
-        genes_to_load = []
+        genes_loaded = []
         if not forced:
             cstr = ''
-            for gene in genes:
-                if cstr != '':
-                    cstr += ' or '
-                cstr += 'gene="{}"'.format(gene)
-            sqlcom = 'select gene, data from expression where ' + cstr
+            if len(genes) < 250:
+                for gene in genes:
+                    if cstr != '':
+                        cstr += ' or '
+                    cstr += 'gene="{}"'.format(gene)
+                sqlcom = 'select gene, data from expression where ' + cstr
+            else:
+                sqlcom = 'select gene, data from expression'
             if verbose:
                 sys.stderr.write(sqlcom + '\n')
             cur.execute(sqlcom)
             for r in cur.fetchall():
                 gene = r[0]
-                values = json.loads(gzip.decompress(r[1]).decode('utf-8'))
-                expression[gene] = values
+                if gene in genes:
+                    if r[1] is not None and len(r[1]) == 0:
+                        logger.info(f'reading {gene} from cache')
+                        values = json.loads(gzip.decompress(r[1]).decode('utf-8'))
+                        if len(values) > 0:
+                            expression[gene] = values
+                    else:
+                        genes_loaded.append(gene)
         n_genes = len(genes)
 
         existing = set()
@@ -259,12 +281,10 @@ def load_gene_expression(filename:str, genes:list, **kwargs)->pd.DataFrame:
                 g_.append(g)
                 m_.append(expression[g])
             return pd.DataFrame(np.array(m_, dtype=np.float32), index=g_, columns=columns)
-
-        genes_to_load = set([g for g in genes if g not in expression])
+        genes_to_load = set([g for g in genes if g not in genes_loaded])
         genes_to_save = []
-        if verbose:
-            sys.stderr.write('\033{}\n'.format(','.join(genes_to_load)))
-            sys.stderr.write('\033[Kloading {} genes from {} : {}\n'.format(len(genes_to_load), filename, ','.join(genes_to_load)))
+        logger.info('{}'.format(','.join(genes_to_load)))
+        logger.info('loading {} genes from {} : {}'.format(len(genes_to_load), filename, ','.join(genes_to_load)))
         with open(filename) as fi:
             columns = [x_.strip('"\n') for x_ in fi.readline().split('\t')]
             if columns[0] != '' and (columns[0].lower() not in ('tracking_id', 'gene', 'transcript_id', 'gene_id')):
@@ -286,6 +306,12 @@ def load_gene_expression(filename:str, genes:list, **kwargs)->pd.DataFrame:
                 cur.execute('update expression set data=? where gene=?', (valueobj, gene))
             else:
                 cur.execute('insert into expression (gene, data) values(?, ?)', (gene, valueobj))
+        for gene in genes_to_load:
+            if gene not in genes_to_save:
+                # zobj = gzip.compress('[]'.encode('utf-8'))
+                logger.info(f'{gene} is set as NULL')
+                # logger.info(zobj)
+                cur.execute('insert into expression (gene, data) values(?, NULL)', (gene, ))
         m_ = []
         g_ = []
         for g in sorted(expression.keys()):

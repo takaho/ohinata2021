@@ -19,6 +19,7 @@ import plotly.subplots
 import scipy.sparse
 import pickle
 import gzip
+import logging
 from cellrangerwrapper import *
 
 def calculate_coordinate_color(pos, cmin, cmax, random_factor=0.4, colormode=0):
@@ -121,8 +122,8 @@ def show_marker(arguments=None):
     parser.add_argument('-u', help='coordinates such as UMAP or tSNE')
     parser.add_argument('-d', type=int, default=2, choices=[2, 3], help='2D or 3D chart')
     parser.add_argument('-o', default='exprchart')
-    parser.add_argument('--threshold', default=1, type=float, help='expression threshold, 0.9 as 90% in percentile mode')
-    parser.add_argument('--percentile', action='store_true')
+    # parser.add_argument('--threshold', default=1, type=float, help='expression threshold, 0.9 as 90% in percentile mode')
+    parser.add_argument('--percentile', default=1, type=float, help='expression threshold, 0.9 as 90% in percentile mode')
     parser.add_argument('--output-all', action='store_true')
     args = parser.parse_known_args(arguments)[0]
 
@@ -137,7 +138,9 @@ def show_marker(arguments=None):
     fn_expression = args.e
     fn_coord = args.u
     output_all = args.output_all
-    threshold = args.threshold
+    threshold = args.percentile
+
+    percentile_mode = threshold < 1
 
     os.makedirs(outdir, exist_ok=True)
 
@@ -218,7 +221,7 @@ def show_marker(arguments=None):
         # Violin chart
         n_charts = len(marker_genes)
         fig = plotly.subplots.make_subplots(rows=n_rows, cols=n_cols, subplot_titles=marker_genes)
-        fig.print_grid()
+        # fig.print_grid()
         traces = []
         for i, g in enumerate(marker_genes):
             values = expr.loc[g].values
@@ -306,7 +309,7 @@ def show_marker(arguments=None):
         if marker not in expr.index: continue
         values = expr.loc[marker].values
         if percentile_mode:
-            pt = np.percentile(values, [0, threshold])
+            pt = np.percentile(values, [0, threshold * 100])
             thr_value = pt[1]
         else:
             thr_value = threshold
@@ -318,7 +321,7 @@ def show_marker(arguments=None):
             continue
         if verbose and percentile_mode:
             # print(pt, np.percentile(values, [0,10,25,50,75,90,100]))
-            sys.stderr.write('{}\t{:.1f}\t{:.1f}\t{}\n'.format(marker, threshold, thr_value, len(index)))
+            sys.stderr.write('{}\t>{:.1f}\t{}/{}\n'.format(marker, thr_value, len(index), len(values)))
         xyz = coord.values[index]
         texts = coord.index[index]
         if mode2d:
